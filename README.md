@@ -6,7 +6,7 @@ caret or a whole script, and shows results in a sortable grid — without the pa
 that Ultimate ships.
 
 * Plugin id: `com.sqlquery.simple-sql-query`
-* Version: `1.0.0`
+* Version: `1.1.0`
 * Since build: `253` (IntelliJ IDEA 2025.3). No `until-build`, so it keeps working after an
   IDE upgrade.
 * Licence: **MIT** — see [Licence](#licence).
@@ -24,7 +24,7 @@ cd C:\Work\Projects\AI\sql-query-plugin
 .\gradlew.bat buildPlugin
 ```
 
-Result: `build\distributions\sql-query-plugin-1.0.0.zip`
+Result: `build\distributions\sql-query-plugin-1.1.0.zip`
 
 | Task                                             | What it does                                   |
 |--------------------------------------------------|------------------------------------------------|
@@ -37,7 +37,7 @@ Result: `build\distributions\sql-query-plugin-1.0.0.zip`
 ## 2. Install
 
 1. **Settings → Plugins → ⚙ → Install Plugin from Disk…**
-2. Pick `build\distributions\sql-query-plugin-1.0.0.zip`.
+2. Pick `build\distributions\sql-query-plugin-1.1.0.zip`.
 3. Restart the IDE.
 4. Open **View → Tool Windows → Simple SQL Query**.
 
@@ -45,13 +45,44 @@ Result: `build\distributions\sql-query-plugin-1.0.0.zip`
 
 ### Layout
 
-The tool window is a single column, top to bottom:
+The tool window has two columns. On the **left** is the database structure browser; on the
+**right** is the editor over the results. You can drag the divider, and double-click it to
+collapse the browser out of the way.
+
+**Right-hand column, top to bottom:**
 
 1. **Connection bar** — profile, Connect/Disconnect, Manage…, Database selector.
 2. **Execution toolbar** — Run Statement, Run All, Stop, Auto-commit, Commit, Rollback, Clear.
 3. **SQL editor** — editable, with line numbers and soft wraps.
 4. **Results tabs** — one tab per statement, each a sortable grid.
 5. **Status bar** — connection state on the left, row count on the right.
+
+**Left-hand column — database structure browser.** A tree of schemas and their objects:
+
+```
+public
+  Tables              agent, agent_capability, agent_event, tool, …
+  Views               agent_events_view, …
+  Materialized Views
+  Functions           fn_name(arg types) → return type
+  Procedures
+  Triggers            trg_name  · relation · BEFORE INSERT → function
+  Sequences           seq_name  · type
+  Types               enum / composite / domain / range
+  Extensions          plpgsql v1.0
+```
+
+* **Double-click a table or view** to run `select * from <schema>.<table> limit 20;` and see the
+  grid. This is the main interaction.
+* Double-click anything else to get a useful starting statement: a function becomes
+  `select * from fn() limit 20`, a sequence shows its current value, a trigger shows its
+  definition, and a schema lists its columns.
+* Expanding a table shows its **columns** (type, NOT NULL, default) and its **indexes**,
+  marking primary keys.
+* Children load lazily, so opening a schema with hundreds of tables does not block the UI.
+* The **filter box** narrows the loaded objects as you type; **Refresh** re-reads from the
+  server, **Collapse All** resets the tree, **Preview Selected** runs the selected object
+  without a double-click.
 
 Commit and Rollback are enabled only while auto-commit is off and a session is open.
 
@@ -143,41 +174,51 @@ values.
 
 `.\gradlew.bat test` runs two suites.
 
-**`CoreIntegrationTest` — 64 checks against a real PostgreSQL server.** The JDBC layer
+**`CoreIntegrationTest` — 127 checks against a real PostgreSQL server.** The JDBC layer
 (`com.sqlquery.plugin.db`) contains no IntelliJ APIs precisely so it can be exercised headlessly.
-The suite covers statement splitting (comments, nesting, dollar quotes), value formatting,
-connection and schema/database listing, result-set limits and truncation, DDL/DML row counts,
-error propagation and transaction commit/rollback. It is skipped, not failed, when nothing is
-listening on the target port; point it elsewhere with `-Dpg.host`, `-Dpg.port`, `-Dpg.database`,
-`-Dpg.user`, `-Dpg.password`.
+The suite covers statement splitting (comments, nesting, dollar quotes), destructive-statement
+detection, value formatting, identifier quoting, connection and schema/database listing,
+result-set limits and truncation, DDL/DML row counts, error propagation, transaction
+commit/rollback, and the whole structure browser read layer — schemas, relations, columns,
+indexes, routines, triggers, sequences, types and extensions — including running a generated
+`select ... limit 20` preview and asserting it is capped. It is skipped, not failed, when nothing
+is listening on the target port; point it elsewhere with `-Dpg.host`, `-Dpg.port`,
+`-Dpg.database`, `-Dpg.user`, `-Dpg.password`.
 
 **`ToolWindowBootTest` — loads the plugin in a real (headless) IDE.** It asserts that the
 `toolWindow` extension from `plugin.xml` resolves against this plugin and points at
-`SqlQueryToolWindowFactory`, that there is exactly one such extension configured for the right
-anchor, that the factory builds a panel whose UI constructs and has a real preferred size, that
-construction is repeatable and disposal is idempotent, and that the `SqlQuerySettings` service
+`SqlQueryToolWindowFactory`, that the factory builds a panel whose UI constructs with a real
+preferred size, that the SQL editor is editable (not a read-only viewer), that the connection bar
+sits on the NORTH edge, that the Run toolbar is populated with the execution actions, and that the
+structure browser is part of the layout and generates the right SQL when a table is activated —
+including quoting a table named `user`. It also checks that the `SqlQuerySettings` service
 resolves with a seeded profile. Note that the headless IDE registers no tool windows of its own,
 so the suite deliberately asserts on the extension point rather than on
 `ToolWindowManager.getToolWindow(...)`.
 
 Smoke-tested with `.\gradlew.bat runIde`: the sandbox IDE (build IU-253.28294.334) logs
-`Loaded custom plugins: Simple SQL Query (1.0.0)` with no plugin exception.
+`Loaded custom plugins: Simple SQL Query (1.1.0)` with no plugin exception.
 
 ## 7. Project layout
 
 ```
 src/main/java/com/sqlquery/plugin/
-  db/        ConnectionProfile   saved connection definition (no password)
-             DriverResolver      finds a PostgreSQL JDBC driver
-             JarLoader           class loader for a user supplied driver jar
-             PostgresSession     one live JDBC session, transactions, cancel
-             SqlRunner           executes a statement, reads results
-             SqlSplitter         splits a script into statements
-             SqlValueFormatter   JDBC value -> display text
-             StatementResult     sealed result type (QueryResult | UpdateResult)
-  execute/   QueryExecutor        background execution, cancellation, transactions
-  settings/  SqlQuerySettings     persisted profiles + credential store access
-  ui/        SqlQueryPanel             the tool window
+  db/        ConnectionProfile     saved connection definition (no password)
+             DbStructureReader     schemas, relations, columns, indexes, routines,
+                                   triggers, sequences, types, extensions
+             DriverResolver        finds a PostgreSQL JDBC driver
+             JarLoader             class loader for a user supplied driver jar
+             PostgresSession       one live JDBC session, transactions, cancel, structure
+             SqlIdentifiers        identifier quoting + generated SELECT/preview SQL
+             SqlRunner             executes a statement, reads results
+             SqlSplitter           splits a script into statements
+             StatementSafety       destructive-statement detection
+             SqlValueFormatter     JDBC value -> display text
+             StatementResult       sealed result type (QueryResult | UpdateResult)
+  execute/   QueryExecutor          background execution, cancellation, transactions
+  settings/  SqlQuerySettings       persisted profiles + credential store access
+  ui/        DatabaseStructurePanel database structure browser (tree, filter, double-click)
+             SqlQueryPanel             the tool window
              SqlQueryToolWindowFactory  tool window entry point
              ConnectionProfilesDialog   profile editor
              ResultGridModel            table model over a QueryResult
@@ -186,9 +227,10 @@ src/main/resources/META-INF/
   plugin.xml
   simple-sql-query-database.xml   loaded only when Database Tools is present
 src/test/java/com/sqlquery/plugin/
-  db/CoreIntegrationCheck.java    the 64 checks (also runnable as a main class)
+  db/CoreIntegrationCheck.java    the 127 checks (also runnable as a main class)
   db/CoreIntegrationTest.java     JUnit wrapper, skips when no server is listening
-  ui/ToolWindowBootTest.java      plugin boot + UI construction in a headless IDE
+  ui/ToolWindowBootTest.java      plugin boot, UI construction, browser behaviour
+
 ```
 
 ## 8. Licence

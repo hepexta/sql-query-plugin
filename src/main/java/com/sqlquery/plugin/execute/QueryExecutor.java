@@ -24,7 +24,6 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
-import java.util.regex.Pattern;
 
 /**
  * Owns the {@link PostgresSession} for a tool window and runs SQL on a background thread
@@ -35,13 +34,6 @@ import java.util.regex.Pattern;
  */
 public final class QueryExecutor {
 
-    /**
-     * Statements worth a confirmation prompt. Deliberately conservative: only keywords that
-     * are essentially never accidental.
-     */
-    private static final Pattern DESTRUCTIVE = Pattern.compile(
-            "(?is)^(drop|truncate)\\b|\\bdelete\\s+from\\b|\\balter\\s+table\\s+\\S+\\s+drop\\b");
-
     private final PostgresSession session = new PostgresSession();
     private volatile boolean cancelRequested;
 
@@ -51,32 +43,6 @@ public final class QueryExecutor {
 
     public boolean isConnected() {
         return session.isConnected();
-    }
-
-    /** True when the statement should be confirmed with the user before running. */
-    public static boolean isDestructive(@NotNull String sql) {
-        return DESTRUCTIVE.matcher(stripLeadingComments(sql)).find();
-    }
-
-    private static @NotNull String stripLeadingComments(@NotNull String sql) {
-        String s = sql.stripLeading();
-        while (true) {
-            if (s.startsWith("--")) {
-                int nl = s.indexOf('\n');
-                if (nl < 0) {
-                    return "";
-                }
-                s = s.substring(nl + 1).stripLeading();
-            } else if (s.startsWith("/*")) {
-                int end = s.indexOf("*/");
-                if (end < 0) {
-                    return "";
-                }
-                s = s.substring(end + 2).stripLeading();
-            } else {
-                return s;
-            }
-        }
     }
 
     // ---------------------------------------------------------------- connecting

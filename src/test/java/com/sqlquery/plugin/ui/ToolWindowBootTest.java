@@ -112,6 +112,128 @@ public class ToolWindowBootTest extends BasePlatformTestCase {
                 editor.getDocument().getText().startsWith("select 42;"));
     }
 
+    /**
+     * The structure browser must be present and must actually generate a query when a table is
+     * activated - the double-click behaviour the whole panel exists for.
+     */
+    public void testStructureBrowserGeneratesSelectOnTableActivation() {
+        List<String> executed = new ArrayList<>();
+        DatabaseStructurePanel browser = new DatabaseStructurePanel(executed::add);
+        browser.setProvider(new FakeProvider(), "public");
+        browser.reload();
+        loadAllForTests(browser);
+
+        // The headline behaviour: a table yields "select * from <table> limit 20".
+        assertTrue("double-clicking a table must run a statement", executed.isEmpty());
+        assertTrue("the table node should be loaded", browser.activateNodeForTests("agent"));
+        assertEquals("expected exactly one statement", 1, executed.size());
+        assertTrue("generated SQL should be a SELECT capped at 20 rows, was: " + executed,
+                executed.get(0).startsWith("select * from public.agent ")
+                        && executed.get(0).contains("limit 20"));
+
+        // A view previews the same way.
+        executed.clear();
+        assertTrue("activating a view must run a statement",
+                browser.activateNodeForTests("agent_events_view"));
+        assertTrue("a view should also produce a preview, was: " + executed,
+                executed.get(0).startsWith("select * from public.agent_events_view "));
+    }
+
+    /** Reserving the table name must survive the round trip into generated SQL. */
+    public void testStructureBrowserQuotesReservedTableNames() {
+        List<String> executed = new ArrayList<>();
+        DatabaseStructurePanel browser = new DatabaseStructurePanel(executed::add);
+        browser.setProvider(new FakeProvider(), "public");
+        browser.reload();
+        loadAllForTests(browser);
+
+        assertTrue("the reserved-name table should be loaded",
+                browser.activateNodeForTests("user"));
+        assertEquals("select * from public.\"user\" limit 20;", executed.get(0));
+    }
+
+    /** The structure browser must sit in the tool window as a left-hand panel. */
+    public void testStructureBrowserIsPartOfTheLayout() {
+        SqlQueryPanel panel = new SqlQueryPanel(getProject(), getTestRootDisposable());
+        DatabaseStructurePanel browser = panel.getStructurePanelForTests();
+        assertNotNull("the structure browser is not part of the panel", browser);
+        assertTrue("the structure browser should be laid out inside the tool window",
+                SwingUtilities.isDescendingFrom(browser, panel.getContent()));
+    }
+
+    /** Minimal in-memory structure provider: one schema, one table, one view. */
+    private static final class FakeProvider implements DatabaseStructurePanel.StructureProvider {
+        @Override
+        public @NotNull List<String> schemaNames() {
+            return List.of("public");
+        }
+
+        @Override
+        public @NotNull List<com.sqlquery.plugin.db.DbStructureReader.Relation> relations(@NotNull String schema) {
+            return List.of(
+                    new com.sqlquery.plugin.db.DbStructureReader.Relation("public", "agent_events_view", "VIEW", -1, null),
+                    new com.sqlquery.plugin.db.DbStructureReader.Relation("public", "user", "TABLE", 3, null),
+                    new com.sqlquery.plugin.db.DbStructureReader.Relation("public", "agent", "TABLE", 42, null));
+        }
+
+        @Override
+        public @NotNull List<com.sqlquery.plugin.db.DbStructureReader.Column> columns(@NotNull String schema,
+                                                                                     @NotNull String relation) {
+            return List.of(new com.sqlquery.plugin.db.DbStructureReader.Column("id", "int8", false, null, null));
+        }
+
+        @Override
+        public @NotNull List<com.sqlquery.plugin.db.DbStructureReader.Index> indexes(@NotNull String schema,
+                                                                                    @NotNull String relation) {
+            return List.of();
+        }
+
+        @Override
+        public @NotNull List<com.sqlquery.plugin.db.DbStructureReader.Routine> routines(@NotNull String schema,
+                                                                                       boolean procedures) {
+            return List.of();
+        }
+
+        @Override
+        public @NotNull List<com.sqlquery.plugin.db.DbStructureReader.Trigger> triggers(@NotNull String schema) {
+            return List.of();
+        }
+
+        @Override
+        public @NotNull List<com.sqlquery.plugin.db.DbStructureReader.Sequence> sequences(@NotNull String schema) {
+            return List.of();
+        }
+
+        @Override
+        public @NotNull List<com.sqlquery.plugin.db.DbStructureReader.TypeInfo> types(@NotNull String schema) {
+            return List.of();
+        }
+
+        @Override
+        public @NotNull List<com.sqlquery.plugin.db.DbStructureReader.Extension> extensions() {
+            return List.of();
+        }
+    }
+
+    /**
+     * Loading runs on a pooled thread in the IDE and posts back to the EDT; tests already run on
+     * the EDT, where the panel deliberately loads inline. Opening the folders therefore loads
+     * their children synchronously.
+     */
+    private static void loadAllForTests(@NotNull DatabaseStructurePanel browser) {
+        assertTrue("structure browser never loaded the schema list",
+                browser.getRootForTests().getChildCount() > 0);
+        javax.swing.tree.DefaultMutableTreeNode schema =
+                (javax.swing.tree.DefaultMutableTreeNode) browser.getRootForTests().getChildAt(0);
+        browser.loadChildrenForTests(schema);
+
+        for (int i = 0; i < schema.getChildCount(); i++) {
+            javax.swing.tree.DefaultMutableTreeNode category =
+                    (javax.swing.tree.DefaultMutableTreeNode) schema.getChildAt(i);
+            browser.loadChildrenForTests(category);
+        }
+    }
+
     /** The Run toolbar must be populated with the execution actions and wired into the panel. */
     public void testRunToolbarIsWiredIntoThePanel() {
         SqlQueryPanel panel = new SqlQueryPanel(getProject(), getTestRootDisposable());

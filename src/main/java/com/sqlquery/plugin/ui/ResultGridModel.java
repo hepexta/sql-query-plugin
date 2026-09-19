@@ -6,6 +6,8 @@
  */
 package com.sqlquery.plugin.ui;
 
+import com.intellij.ui.ColoredTableCellRenderer;
+import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.table.JBTable;
 import com.sqlquery.plugin.db.SqlValueFormatter;
 import com.sqlquery.plugin.db.StatementResult;
@@ -14,10 +16,7 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.JTable;
 import javax.swing.table.AbstractTableModel;
-import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableRowSorter;
-import java.awt.Component;
-import java.awt.Font;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -26,6 +25,11 @@ import java.util.List;
  *
  * <p>Keeps the raw JDBC values so copied text matches the database exactly, while the
  * renderer shows {@code NULL} for SQL nulls and a placeholder for binary data.</p>
+ *
+ * <p>Cell text is drawn as characters and never as markup. Database values are attacker-influenced
+ * in the general case, and a Swing label that parses HTML would not only misrepresent a value like
+ * {@code <html>hidden} but would honour an {@code <img src="http://...">} inside it by requesting
+ * that URL.</p>
  */
 public final class ResultGridModel extends AbstractTableModel {
 
@@ -92,28 +96,35 @@ public final class ResultGridModel extends AbstractTableModel {
     /**
      * Cells are rendered through {@link SqlValueFormatter}; SQL nulls and binary values get a
      * muted italic look so they are distinguishable from the strings {@code NULL} and empty text.
+     *
+     * <p>{@link ColoredTableCellRenderer} is a component that paints appended text fragments. That
+     * is the point: it has no HTML mode, so a value cannot change how it is displayed or make the
+     * grid fetch anything. A {@link javax.swing.table.DefaultTableCellRenderer} is a {@code JLabel},
+     * which parses its text as HTML as soon as it starts with {@code <html>}.</p>
      */
-    private static final class ValueRenderer extends DefaultTableCellRenderer {
+    private static final class ValueRenderer extends ColoredTableCellRenderer {
         @Override
-        public @NotNull Component getTableCellRendererComponent(@NotNull JTable table, @Nullable Object value,
-                                                              boolean isSelected, boolean hasFocus,
-                                                              int row, int column) {
-            Object raw = value;
-            String text = SqlValueFormatter.display(raw);
-            Component component = super.getTableCellRendererComponent(table, text, isSelected, hasFocus, row, column);
+        protected void customizeCellRenderer(@NotNull JTable table, @Nullable Object value,
+                                             boolean selected, boolean hasFocus, int row, int column) {
+            boolean muted = value == null || value instanceof byte[];
+            String text = SqlValueFormatter.display(value);
+            append(text, muted
+                    ? mutedAttributes(selected)
+                    : SimpleTextAttributes.REGULAR_ATTRIBUTES);
+            // Tooltips are HTML-capable too, so the same text has to be escaped there.
+            setToolTipText(UiText.asHtml(text));
+        }
 
-            boolean isNull = raw == null;
-            boolean isBinary = raw instanceof byte[];
-            if (isNull || isBinary) {
-                component.setFont(component.getFont().deriveFont(Font.ITALIC));
-                if (!isSelected) {
-                    component.setForeground(com.intellij.ui.JBColor.GRAY);
-                }
-            } else if (!isSelected) {
-                component.setForeground(table.getForeground());
-            }
-            setToolTipText(text);
-            return component;
+        /**
+         * Italic marks a value that is not really text; gray marks it only while the row is not
+         * selected. The selected variant has to be {@code REGULAR_ITALIC_ATTRIBUTES}: its colour is
+         * null, so it inherits the selection foreground, whereas {@code GRAYED_*} carries its own
+         * gray and would stay gray on the selection background.
+         */
+        private static @NotNull SimpleTextAttributes mutedAttributes(boolean selected) {
+            return selected
+                    ? SimpleTextAttributes.REGULAR_ITALIC_ATTRIBUTES
+                    : SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES;
         }
     }
 

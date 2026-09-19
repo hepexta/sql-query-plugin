@@ -90,11 +90,65 @@ public final class CoreIntegrationCheck {
 
         counter.check(true, "===== SqlSplitter =====");
         splitterChecks(counter);
+        counter.check(true, "===== StatementSafety =====");
+        safetyChecks(counter);
         counter.check(true, "===== SqlValueFormatter =====");
         formatterChecks(counter);
+        counter.check(true, "===== SqlIdentifiers =====");
+        identifierChecks(counter);
         counter.check(true, "===== Connection =====");
         databaseChecks(profile, settings.password(), counter);
         return counter.count;
+    }
+
+    /** Identifier quoting and the statements the structure browser generates. */
+    private static void identifierChecks(Reporter reporter) {
+        check(reporter, "plain identifier not quoted", "agent".equals(SqlIdentifiers.maybeQuote("agent")));
+        check(reporter, "underscore not quoted", "agent_tool".equals(SqlIdentifiers.maybeQuote("agent_tool")));
+        check(reporter, "digits after first char not quoted", "t1".equals(SqlIdentifiers.maybeQuote("t1")));
+        check(reporter, "upper case is quoted", "\"Agent\"".equals(SqlIdentifiers.maybeQuote("Agent")));
+        check(reporter, "leading digit is quoted", "\"1t\"".equals(SqlIdentifiers.maybeQuote("1t")));
+        check(reporter, "space is quoted", "\"my table\"".equals(SqlIdentifiers.maybeQuote("my table")));
+        check(reporter, "embedded quote is doubled", "\"a\"\"b\"".equals(SqlIdentifiers.maybeQuote("a\"b")));
+        // Reserved keywords would change meaning unquoted: "select * from user" reads the
+        // session user, not a table named user.
+        check(reporter, "reserved word 'user' is quoted",
+                "\"user\"".equals(SqlIdentifiers.maybeQuote("user")));
+        check(reporter, "reserved word 'select' is quoted",
+                "\"select\"".equals(SqlIdentifiers.maybeQuote("select")));
+        check(reporter, "reserved word 'table' is quoted",
+                "\"table\"".equals(SqlIdentifiers.maybeQuote("table")));
+        // Clause-introducing words are quoted too: "select * from order limit 20" is legal
+        // PostgreSQL but reads as a syntax error, so the generator stays unambiguous.
+        check(reporter, "clause word 'order' is quoted",
+                "\"order\"".equals(SqlIdentifiers.maybeQuote("order")));
+        check(reporter, "clause word 'limit' is quoted",
+                "\"limit\"".equals(SqlIdentifiers.maybeQuote("limit")));
+        // Ordinary names must stay readable - this is the common case by far.
+        check(reporter, "ordinary name stays bare", "agent_event".equals(SqlIdentifiers.maybeQuote("agent_event")));
+        check(reporter, "preview for an ordinary table is clean",
+                "select * from public.agent limit 20;".equals(SqlIdentifiers.selectPreview("public", "agent")));
+        check(reporter, "preview quotes a reserved table name",
+                "select * from public.\"user\" limit 20;".equals(SqlIdentifiers.selectPreview("public", "user")));
+        check(reporter, "qualified name",
+                "public.agent".equals(SqlIdentifiers.qualified("public", "agent")));
+        check(reporter, "qualified name quotes parts independently",
+                "public.\"MyTable\"".equals(SqlIdentifiers.qualified("public", "MyTable")));
+        check(reporter, "qualified name quotes a reserved part",
+                "public.\"user\"".equals(SqlIdentifiers.qualified("public", "user")));
+
+        check(reporter, "preview SQL shape",
+                "select * from public.agent limit 20;".equals(SqlIdentifiers.selectPreview("public", "agent")));
+        check(reporter, "preview SQL honours a custom limit",
+                "select * from public.agent limit 5;".equals(SqlIdentifiers.selectPreview("public", "agent", 5)));
+        check(reporter, "preview SQL clamps a silly limit",
+                "select * from public.agent limit 1;".equals(SqlIdentifiers.selectPreview("public", "agent", 0)));
+        check(reporter, "routine skeleton",
+                "select * from public.f() limit 20;".equals(SqlIdentifiers.callRoutine("public", "f")));
+        check(reporter, "sequence value SQL",
+                "select * from public.s;".equals(SqlIdentifiers.sequenceValue("public", "s")));
+        check(reporter, "schema overview quotes the literal",
+                SqlIdentifiers.schemaOverview("o'brien").contains("'o''brien'"));
     }
 
     /** Counts how many checks were performed, so callers can detect a silently skipped run. */
@@ -150,14 +204,128 @@ public final class CoreIntegrationCheck {
                 SqlSplitter.of("select 1234567890").preview(8).endsWith("\u2026"));
     }
 
-    private static void formatterChecks(Reporter reporter) {
-        check(reporter, "null renders as NULL", "NULL".equals(SqlValueFormatter.display(null)));
+    /**
+     * Guards the confirmation prompt for destructive statements. This is the only thing standing
+     * between a misplaced caret and a dropped table, and both known ways around it were silent:
+     * a destructive statement after a harmless one, and a nested block comment.
+     */
+    private static void safetyChecks(Reporter reporter) {
+        check(reporter, "plain select is not destructive", !StatementSafety.isDestructive("select 1"));
+        check(reporter, "insert is not destructive",
+                !StatementSafety.isDestructive("insert into t values (1)"));
+        check(reporter, "a table merely named like one is not destructive",
+                !StatementSafety.isDestructive("select * from dropped_items"));
+        check(reporter, "comment-only script has nothing to run",
+                !StatementSafety.isDestructive("-- nothing here\n"));
+        check(reporter, "create table is not destructive",
+                !StatementSafety.isDestructive("create table t(id int)"));
+
+        check(reporter, "drop table is destructive", StatementSafety.isDestructive("drop table t"));
+        check(reporter, "truncate is destructive", StatementSafety.isDestructive("truncate t"));
+        check(reporter, "delete from is destructive",
+                StatementSafety.isDestructive("delete from t where id = 1"));
+        check(reporter, "alter table drop column is destructive",
+                StatementSafety.isDestructive("alter table t drop column c"));
+        check(reporter, "keyword case does not matter", StatementSafety.isDestructive("DROP TABLE t;"));
+        check(reporter, "leading line comment is skipped",
+                StatementSafety.isDestructive("-- maintenance\n/* also a comment */ drop table t"));
+        check(reporter, "leading block comment is skipped",
+                StatementSafety.isDestructive("/* maintenance */ drop table t"));
+
+        // Both of these used to return false: the first because only the start of the whole
+        // script was examined, the second because the first "*/" was taken as the end of the
+        // comment. Each would have run a DROP without asking.
+        check(reporter, "destructive statement after a harmless one is found",
+                StatementSafety.isDestructive("select 1; drop table t;"));
+        check(reporter, "nested block comment cannot hide the statement",
+                StatementSafety.isDestructive("/* outer /* inner */ still comment */ drop table t"));
+    }
+
+    private static void formatterChecks(Reporter reporter) {        check(reporter, "null renders as NULL", "NULL".equals(SqlValueFormatter.display(null)));
         check(reporter, "empty string stays empty", "".equals(SqlValueFormatter.display("")));
         check(reporter, "integer", "42".equals(SqlValueFormatter.display(42)));
         check(reporter, "newline escaped", "a\\nb".equals(SqlValueFormatter.display("a\nb")));
         check(reporter, "binary as hex", "\\x0aff".equals(SqlValueFormatter.display(new byte[]{10, (byte) 0xff})));
         check(reporter, "array in braces",
                 "{1, NULL, 3}".equals(SqlValueFormatter.display(new Object[]{1, null, 3})));
+    }
+
+    /**
+     * The schema browser's read layer, exercised against the live server: schemas, relations,
+     * columns, indexes, routines, triggers, sequences, types and extensions.
+     */
+    private static void structureChecks(PostgresSession session, Reporter reporter) {
+        try {
+            List<String> schemaNames = session.schemaNames();
+            check(reporter, "structure: public schema listed", schemaNames.contains("public"));
+            check(reporter, "structure: system schemas hidden",
+                    schemaNames.stream().noneMatch(s -> s.startsWith("pg_")
+                            || "information_schema".equals(s)));
+
+            List<DbStructureReader.Relation> relations = session.relationsOf("public");
+            check(reporter, "structure: relations found (" + relations.size() + ")", !relations.isEmpty());
+            check(reporter, "structure: the agent table is present",
+                    relations.stream().anyMatch(r -> "agent".equals(r.name()) && r.isTableLike()));
+            check(reporter, "structure: every relation has a kind",
+                    relations.stream().allMatch(r -> r.kind() != null && !r.kind().isBlank()));
+            check(reporter, "structure: qualified name is schema-qualified",
+                    relations.stream().allMatch(r -> r.qualifiedName().startsWith("public.")));
+
+            // Columns of a known table from the allagents schema.
+            List<DbStructureReader.Column> columns = session.columnsOf("public", "agent");
+            check(reporter, "structure: agent has columns (" + columns.size() + ")", !columns.isEmpty());
+            check(reporter, "structure: every column has a type",
+                    columns.stream().allMatch(c -> c.dataType() != null && !c.dataType().isBlank()));
+            check(reporter, "structure: an id column exists",
+                    columns.stream().anyMatch(c -> "id".equals(c.name())));
+            check(reporter, "structure: not-null flags are read",
+                    columns.stream().anyMatch(c -> !c.nullable()));
+
+            // Indexes: the schema uses primary keys everywhere.
+            List<DbStructureReader.Index> indexes = session.indexesOf("public", "agent");
+            check(reporter, "structure: indexes read for agent", !indexes.isEmpty());
+            check(reporter, "structure: a primary key is reported",
+                    indexes.stream().anyMatch(DbStructureReader.Index::primary));
+            check(reporter, "structure: index definitions are present",
+                    indexes.stream().allMatch(i -> i.definition() != null && !i.definition().isBlank()));
+
+            // Routines, triggers, sequences and types must all be queryable without error.
+            List<DbStructureReader.Routine> functions = session.routinesOf("public", false);
+            check(reporter, "structure: function query works (" + functions.size() + " found)", true);
+            check(reporter, "structure: function signatures render",
+                    functions.isEmpty() || functions.stream().noneMatch(f -> f.signature().isBlank()));
+            List<DbStructureReader.Routine> procedures = session.routinesOf("public", true);
+            check(reporter, "structure: procedures are separated from functions",
+                    procedures.stream().allMatch(DbStructureReader.Routine::isProcedure));
+
+            List<DbStructureReader.Trigger> triggers = session.triggersOf("public");
+            check(reporter, "structure: trigger query works (" + triggers.size() + " found)", true);
+            check(reporter, "structure: triggers carry a timing and event",
+                    triggers.stream().noneMatch(t -> t.timing().isBlank() || t.event().isBlank()));
+
+            List<DbStructureReader.Sequence> sequences = session.sequencesOf("public");
+            check(reporter, "structure: sequence query works (" + sequences.size() + " found)", true);
+
+            List<DbStructureReader.TypeInfo> types = session.typesOf("public");
+            check(reporter, "structure: type query works (" + types.size() + " found)", true);
+
+            List<DbStructureReader.Extension> extensions = session.extensions();
+            check(reporter, "structure: extensions listed (" + extensions.size() + ")",
+                    extensions.stream().anyMatch(e -> "plpgsql".equals(e.name())));
+
+            // A generated preview must actually run: this is the double-click behaviour.
+            if (!relations.isEmpty() && relations.get(0).isTableLike()) {
+                String preview = SqlIdentifiers.selectPreview("public", relations.get(0).name());
+                StatementResult previewResult = SqlRunner.execute(session.requireConnection(), preview, 20, 30);
+                check(reporter, "structure: generated preview runs and is capped at 20 rows",
+                        previewResult instanceof StatementResult.QueryResult q && q.rowCount() <= 20);
+                check(reporter, "structure: generated preview is marked truncated when capped",
+                        previewResult instanceof StatementResult.QueryResult q
+                                && (!q.truncated() || q.rowCount() == 20));
+            }
+        } catch (Exception e) {
+            check(reporter, "structure browsing failed: " + e.getMessage(), false);
+        }
     }
 
     private static void databaseChecks(ConnectionProfile profile, String password, Reporter reporter) {
@@ -175,6 +343,7 @@ public final class CoreIntegrationCheck {
             check(reporter, "relations listed (" + relations.size() + ")", !relations.isEmpty());
 
             runnerChecks(session, reporter);
+            structureChecks(session, reporter);
             errorChecks(session, reporter);
             transactionChecks(session, reporter);
 

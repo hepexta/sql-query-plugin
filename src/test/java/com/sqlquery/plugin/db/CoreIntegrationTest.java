@@ -47,7 +47,7 @@ public class CoreIntegrationTest {
             fail(failures.size() + " of " + checks + " checks failed:\n  - "
                     + String.join("\n  - ", failures));
         }
-        assertTrue("expected a meaningful number of checks to run, got " + checks, checks > 40);
+        assertTrue("expected a meaningful number of checks to run, got " + checks, checks > 80);
     }
 
     private static boolean isReachable(String host, int port) {
