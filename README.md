@@ -1,0 +1,260 @@
+# Simple SQL Query — IntelliJ IDEA plugin
+
+A small, focused SQL console for **PostgreSQL** inside IntelliJ IDEA, built for **IntelliJ IDEA
+Community Edition** (2025.3, build 253). It connects over JDBC, runs the statement under the
+caret or a whole script, and shows results in a sortable grid — without the paid Database Tools
+that Ultimate ships.
+
+* Plugin id: `com.sqlquery.simple-sql-query`
+* Version: `1.0.0`
+* Since build: `253` (IntelliJ IDEA 2025.3). No `until-build`, so it keeps working after an
+  IDE upgrade.
+* Licence: **MIT** — see [Licence](#licence).
+
+---
+
+## 1. Build
+
+Prerequisite: **JDK 21** (the IntelliJ Platform itself requires 21). Gradle comes from the
+wrapper, and the target IDE is downloaded by the build.
+
+```powershell
+$env:JAVA_HOME = "C:\path\to\jdk-21"
+cd C:\Work\Projects\AI\sql-query-plugin
+.\gradlew.bat buildPlugin
+```
+
+Result: `build\distributions\sql-query-plugin-1.0.0.zip`
+
+| Task                                             | What it does                                   |
+|--------------------------------------------------|------------------------------------------------|
+| `.\gradlew.bat buildPlugin`                      | Builds the installable zip                     |
+| `.\gradlew.bat test`                             | Runs the headless test suite                   |
+| `.\gradlew.bat runIde`                           | Starts a sandbox IDE with the plugin installed |
+| `.\gradlew.bat verifyPluginStructure`            | Validates `plugin.xml` and the archive layout  |
+| `.\gradlew.bat verifyPluginProjectConfiguration` | Validates the Gradle plugin configuration      |
+
+## 2. Install
+
+1. **Settings → Plugins → ⚙ → Install Plugin from Disk…**
+2. Pick `build\distributions\sql-query-plugin-1.0.0.zip`.
+3. Restart the IDE.
+4. Open **View → Tool Windows → Simple SQL Query**.
+
+## 3. Using it
+
+### Layout
+
+The tool window is a single column, top to bottom:
+
+1. **Connection bar** — profile, Connect/Disconnect, Manage…, Database selector.
+2. **Execution toolbar** — Run Statement, Run All, Stop, Auto-commit, Commit, Rollback, Clear.
+3. **SQL editor** — editable, with line numbers and soft wraps.
+4. **Results tabs** — one tab per statement, each a sortable grid.
+5. **Status bar** — connection state on the left, row count on the right.
+
+Commit and Rollback are enabled only while auto-commit is off and a session is open.
+
+### Connect
+
+The first run seeds one profile (`Local PostgreSQL`: `localhost:5432/postgres`, user `postgres`).
+Click **Manage…** to edit it or add more. **Test Connection** validates the profile and reports
+server and driver versions before you save.
+
+| Field             | Notes                                                                                           |
+|-------------------|-------------------------------------------------------------------------------------------------|
+| Host / Port       | Standard TCP connection details                                                                 |
+| Database          | Default database; switch later from the **Database** combo                                      |
+| User / Password   | The password goes to the IDE credential store (KeePass by default), never to disk in plain text |
+| SSL mode          | `disable`, `allow`, `prefer` (default), `require`, `verify-ca`, `verify-full`                   |
+| JDBC URL override | Optional; wins over the individual fields                                                       |
+| Driver jar        | Optional — see *JDBC driver* below                                                              |
+| Statement timeout | Per-statement timeout in seconds (default 30)                                                   |
+| Row fetch limit   | Maximum rows read per result set (default 500)                                                  |
+
+Then press **Connect**.
+
+### Run SQL
+
+| Action                                     | Shortcut           |
+|--------------------------------------------|--------------------|
+| Run the statement at the caret             | `Ctrl+Enter`       |
+| Run the selected text, or the whole script | `Ctrl+Shift+Enter` |
+
+The splitter understands single quotes (with `''` escapes), double-quoted identifiers,
+`$tag$…$tag$` bodies, `--` line comments and nested `/* /* */ */` comments, so a semicolon inside
+those does not split a statement. Multiple statements produce one results tab each, and the status
+bar reports rows returned, rows affected and elapsed time.
+
+### Results
+
+* Sortable grid; click a header to sort, `Ctrl+C` copies the selected cells as TSV.
+* Right-click for **Copy Cell**, **Copy Row**, **Copy All (with headers)** — all paste into Excel.
+* SQL `NULL` renders as an italic grey `NULL`, distinguishable from an empty string.
+* Binary columns render as `\x…` hex.
+* Result sets larger than the profile's **Row fetch limit** are flagged as truncated.
+
+### Transactions
+
+**Auto-commit** is on by default. Turn it off from the toolbar to keep one transaction open across
+statements, then use **Commit** / **Rollback**. Disconnecting with an open transaction rolls it back.
+
+### Safety
+
+* **Stop** cancels the running statement (it aborts the connection, so the server stops working
+  immediately).
+* Optional confirmation before `DROP` / `TRUNCATE` / `DELETE FROM`, enabled with
+  *"Ask before running DROP / TRUNCATE / DELETE statements"* in the connections dialog.
+
+## 4. JDBC driver
+
+The plugin does **not** bundle a PostgreSQL JDBC driver. It resolves one in this order:
+
+1. the **Driver jar** configured on the connection profile (a jar, or a folder containing jars);
+2. the driver bundled with IntelliJ IDEA's Database Tools plugin;
+3. any PostgreSQL driver already on the IDE classpath.
+
+If none is found, connecting fails with a message explaining exactly this. The fix is to download
+`postgresql-<version>.jar` from <https://jdbc.postgresql.org/download/> and paste its full path
+into **Driver jar**, for example:
+
+```
+C:\Tools\jdbc\postgresql-42.7.8.jar
+```
+
+A copy is already present at `tools\postgresql-42.7.8.jar` in this repository.
+
+## 5. Local development database
+
+Developed and verified against the PostgreSQL instance from
+`C:\Work\Projects\AI\agents-infra\database`:
+
+| Setting         | Value               |
+|-----------------|---------------------|
+| Host / Port     | `localhost:5432`    |
+| Database        | `allagents`         |
+| User / Password | `agents` / `agents` |
+| Server          | PostgreSQL 17.11    |
+
+Start it with `docker compose up -d --build` in that directory, then create a profile with those
+values.
+
+## 6. Verification
+
+`.\gradlew.bat test` runs two suites.
+
+**`CoreIntegrationTest` — 64 checks against a real PostgreSQL server.** The JDBC layer
+(`com.sqlquery.plugin.db`) contains no IntelliJ APIs precisely so it can be exercised headlessly.
+The suite covers statement splitting (comments, nesting, dollar quotes), value formatting,
+connection and schema/database listing, result-set limits and truncation, DDL/DML row counts,
+error propagation and transaction commit/rollback. It is skipped, not failed, when nothing is
+listening on the target port; point it elsewhere with `-Dpg.host`, `-Dpg.port`, `-Dpg.database`,
+`-Dpg.user`, `-Dpg.password`.
+
+**`ToolWindowBootTest` — loads the plugin in a real (headless) IDE.** It asserts that the
+`toolWindow` extension from `plugin.xml` resolves against this plugin and points at
+`SqlQueryToolWindowFactory`, that there is exactly one such extension configured for the right
+anchor, that the factory builds a panel whose UI constructs and has a real preferred size, that
+construction is repeatable and disposal is idempotent, and that the `SqlQuerySettings` service
+resolves with a seeded profile. Note that the headless IDE registers no tool windows of its own,
+so the suite deliberately asserts on the extension point rather than on
+`ToolWindowManager.getToolWindow(...)`.
+
+Smoke-tested with `.\gradlew.bat runIde`: the sandbox IDE (build IU-253.28294.334) logs
+`Loaded custom plugins: Simple SQL Query (1.0.0)` with no plugin exception.
+
+## 7. Project layout
+
+```
+src/main/java/com/sqlquery/plugin/
+  db/        ConnectionProfile   saved connection definition (no password)
+             DriverResolver      finds a PostgreSQL JDBC driver
+             JarLoader           class loader for a user supplied driver jar
+             PostgresSession     one live JDBC session, transactions, cancel
+             SqlRunner           executes a statement, reads results
+             SqlSplitter         splits a script into statements
+             SqlValueFormatter   JDBC value -> display text
+             StatementResult     sealed result type (QueryResult | UpdateResult)
+  execute/   QueryExecutor        background execution, cancellation, transactions
+  settings/  SqlQuerySettings     persisted profiles + credential store access
+  ui/        SqlQueryPanel             the tool window
+             SqlQueryToolWindowFactory  tool window entry point
+             ConnectionProfilesDialog   profile editor
+             ResultGridModel            table model over a QueryResult
+             ResultGridSupport          column sizing, clipboard actions
+src/main/resources/META-INF/
+  plugin.xml
+  simple-sql-query-database.xml   loaded only when Database Tools is present
+src/test/java/com/sqlquery/plugin/
+  db/CoreIntegrationCheck.java    the 64 checks (also runnable as a main class)
+  db/CoreIntegrationTest.java     JUnit wrapper, skips when no server is listening
+  ui/ToolWindowBootTest.java      plugin boot + UI construction in a headless IDE
+```
+
+## 8. Licence
+
+**MIT License.** Copyright (c) 2026 hepexta. The full text is in [`LICENSE`](LICENSE).
+
+What MIT means in practice:
+
+* Anyone may use, modify, and redistribute this code, including commercially and in closed
+  products.
+* They **must** keep the copyright notice and the licence text, and they may not claim they
+  wrote the original.
+* The software comes with no warranty and no liability.
+
+MIT is the usual choice for IntelliJ plugins and is fully compatible with building against the
+IntelliJ Platform: the platform SDK is Apache-2.0, which imposes no licence condition on your
+own plugin.
+
+### Files that make the licence explicit
+
+| File                     | Purpose                                                                      |
+|--------------------------|------------------------------------------------------------------------------|
+| `LICENSE`                | The verbatim MIT text                                                        |
+| `NOTICE`                 | Attribution, third-party components, trademark disclaimer                    |
+| `THIRD-PARTY-NOTICES.md` | Full detail on the platform SDK, the PostgreSQL JDBC driver and icons        |
+| `plugin.xml`             | `<vendor url="…">hepexta</vendor>` — the platform has **no** licence element |
+| `gradle.properties`      | `pluginLicense=MIT` — documentation only, the build cannot emit it           |
+| every `*.java`           | `SPDX-License-Identifier: MIT` header                                        |
+
+**There is no licence field in `plugin.xml` or in the Gradle DSL.** This trips people up, so to
+be explicit: the [official plugin configuration
+reference](https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html) lists the
+allowed `<idea-plugin>` children, and `license` is not among them; adding it makes the IDE log
+`Unknown element: license` at startup. The IntelliJ Platform Gradle Plugin 2.x
+`pluginConfiguration` block has no `license` property either. Declaring the licence is a
+**JetBrains Marketplace web-form** field on the plugin's page. In the IDE, attribution comes
+from `<vendor>`.
+
+### Before you publish
+
+1. If you publish on **JetBrains Marketplace**, set the plugin's licence to **MIT** in the
+   Marketplace upload form — that is the only place it is recorded.
+2. **Trademarks.** "IntelliJ", "IntelliJ IDEA" and "JetBrains" are trademarks of JetBrains
+   s.r.o. You may say the plugin *is for* IntelliJ IDEA; you may not imply JetBrains endorses
+   it, and you must not put "IntelliJ" in the plugin id (Marketplace rejects that).
+3. **Ownership.** If any of this was written for an employer or on company time, the employer
+   likely owns the copyright, and only they can grant the licence. Check before publishing.
+4. Confirm the copyright holder reads the way you want. `hepexta` is currently the holder name
+   in `LICENSE`, `NOTICE` and every source header, and the vendor in `plugin.xml`. A legal name
+   gives a stronger authorship claim than a handle.
+
+### Why the PostgreSQL JDBC driver is not bundled
+
+The plugin resolves a driver at runtime (see section 4) and never redistributes one. The driver
+is BSD-2-Clause licensed by the PostgreSQL Global Development Group, which is permissive but
+*does* require reproducing its notice in binary distributions. Not bundling it keeps the
+obligations trivial. If you ever do bundle it, the notice text is reproduced in
+`THIRD-PARTY-NOTICES.md` for you to carry over.
+
+## 9. Notes on the IntelliJ Platform 2025.3
+
+Three things changed in 2025.3 and are reflected in `build.gradle.kts`:
+
+* IntelliJ IDEA merged its Community and Ultimate artifacts, so `intellijIdeaCommunity(...)` no
+  longer resolves — the unified `intellijIdea("2025.3")` dependency is the correct one for
+  build 253 and later.
+* IntelliJ Platform Gradle Plugin 2.x requires **Gradle 9+** (the wrapper is pinned to 9.4.0).
+* `until-build` is deprecated for build 243+ and actively prevents installation on newer IDEs,
+  so it is intentionally absent.

@@ -1,0 +1,37 @@
+Simple SQL Query — IntelliJ IDEA plugin
+Copyright (c) 2026 hepexta
+
+This product is licensed under the MIT License. The full license text is in the LICENSE file
+in the root of this repository.
+
+Developed by the copyright holder above. If you redistribute this software or a modified
+version of it, you must keep the copyright notice and the license text, as required by the
+MIT License. You may not claim authorship of the original work.
+
+--------------------------------------------------------------------------------
+Third-party components
+--------------------------------------------------------------------------------
+
+This project uses, but does not redistribute, the following third-party software. See
+THIRD-PARTY-NOTICES.md for the full texts and details.
+
+* IntelliJ Platform SDK — Copyright 2000-2026 JetBrains s.r.o.
+  Licensed under the Apache License, Version 2.0.
+  https://www.jetbrains.com/legal/docs/opensource/intellij-platform/
+
+* PostgreSQL JDBC Driver (pgJDBC) — Copyright (c) 1997, PostgreSQL Global Development Group.
+  Licensed under the BSD 2-Clause "Simplified" License.
+  https://jdbc.postgresql.org/license/
+
+--------------------------------------------------------------------------------
+Trademarks
+--------------------------------------------------------------------------------
+
+"IntelliJ", "IntelliJ IDEA", "JetBrains" and the JetBrains logo are trademarks or registered
+trademarks of JetBrains s.r.o. "PostgreSQL" and the PostgreSQL logo are trademarks of the
+PostgreSQL Community Association of Canada.
+
+This project is an independent plugin. It is not affiliated with, endorsed by, or sponsored by
+JetBrains s.r.o. or the PostgreSQL Global Development Group. These names are used only to
+describe what the software is interoperable with, which is a customary and reasonable use
+permitted by the Apache License, Version 2.0, Section 6.

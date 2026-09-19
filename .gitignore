@@ -1,0 +1,16 @@
+.gradle/
+.gradle-home/
+build/
+out/
+.idea/
+*.iml
+*.log
+.intellijPlatform/
+tools/
+
+# The plugin deliberately does NOT bundle or commit the PostgreSQL JDBC driver. It is
+# BSD-2-Clause licensed by the PostgreSQL Global Development Group, and it is only needed at
+# test scope (Gradle fetches it from Maven Central) or at runtime from the IDE / a path the
+# user configures. See THIRD-PARTY-NOTICES.md.
+*.jar
+!gradle/wrapper/gradle-wrapper.jar

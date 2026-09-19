@@ -1,0 +1,50 @@
+<idea-plugin>
+    <id>com.sqlquery.simple-sql-query</id>
+    <name>Simple SQL Query</name>
+    <vendor url="https://github.com/hepexta/sql-query-plugin">hepexta</vendor>
+
+    <description><![CDATA[
+    <p>A small, focused SQL console for PostgreSQL inside IntelliJ IDEA.</p>
+    <ul>
+      <li>Connect to any PostgreSQL server with host, port, database, user, password and SSL mode.</li>
+      <li>Write SQL in an editor and run the statement at the caret with <b>Ctrl+Enter</b>,
+          or the whole script with <b>Ctrl+Shift+Enter</b>.</li>
+      <li>Results appear in a sortable grid; multiple statements get one tab each,
+          with rows affected and elapsed time per statement.</li>
+      <li>Auto-commit toggle plus explicit Commit / Rollback for transactional work.</li>
+      <li>Row fetch limit and per-statement timeout to keep accidental
+          <code>SELECT *</code> on a huge table from freezing the IDE.</li>
+      <li>Copy cells, rows or the whole result set as tab separated text.</li>
+      <li>Saved connection profiles; passwords go to the IDE credential store, never to disk in plain text.</li>
+    </ul>
+    <p>Works in IntelliJ IDEA Community Edition. If the IDE does not provide a PostgreSQL JDBC
+       driver, point the connection profile at a <code>postgresql-&lt;version&gt;.jar</code> you downloaded.</p>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
+    <!--
+      Bundled in both IntelliJ IDEA Community and Ultimate. Used at runtime (reflectively) to
+      obtain the PostgreSQL JDBC driver that ships with the IDE. Declared as optional so the
+      plugin still loads if the Database Tools plugin is unavailable or disabled.
+    -->
+    <depends optional="true" config-file="simple-sql-query-database.xml">com.intellij.database</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Simple SQL Query"
+                    anchor="right"
+                    icon="AllIcons.Database.External"
+                    factoryClass="com.sqlquery.plugin.ui.SqlQueryToolWindowFactory"
+                    canCloseContents="false"/>
+    </extensions>
+
+    <!--
+      Simple SQL Query is an independent plugin, not affiliated with, endorsed by or sponsored
+      by JetBrains s.r.o. or the PostgreSQL Global Development Group. "IntelliJ", "IntelliJ
+      IDEA" and "JetBrains" are trademarks of JetBrains s.r.o.; "PostgreSQL" is a trademark of
+      the PostgreSQL Community Association of Canada. These names are used only to describe
+      interoperability. See NOTICE and THIRD-PARTY-NOTICES.md in the repository.
+
+      Licensed under the MIT License. See the LICENSE file in the repository.
+    -->
+</idea-plugin>
