@@ -19,6 +19,7 @@ import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBList;
+import com.intellij.ui.components.JBPasswordField;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.JBTextArea;
 import com.intellij.ui.components.JBTextField;
@@ -63,7 +64,13 @@ public final class ConnectionProfilesDialog extends DialogWrapper {
     private final JBTextField databaseField = new JBTextField();
     private final JBTextField userField = new JBTextField();
     private final com.intellij.openapi.ui.ComboBox<String> sslCombo = new ComboBox<>(SSL_MODES);
-    private final JBTextField passwordField = new JBTextField();
+    /**
+     * Masked: this field holds a database password, and it is filled with the value read back
+     * from the credential store when a profile is selected. A plain text field would show it to
+     * anyone looking at the screen — and the password is one of the few values here that the
+     * user cannot check by eye in a log or a copy of the file.
+     */
+    private final JBPasswordField passwordField = new JBPasswordField();
     private final JBTextField urlOverrideField = new JBTextField();
     private final JBTextField driverPathField = new JBTextField();
     private final JBTextField timeoutField = new JBTextField();
@@ -294,7 +301,7 @@ public final class ConnectionProfilesDialog extends DialogWrapper {
             }
             profileList.repaint();
         }
-        pendingPasswords.put(newName, passwordField.getText());
+        pendingPasswords.put(newName, new String(passwordField.getPassword()));
     }
 
     private void applyFieldsTo(@NotNull ConnectionProfile profile) {
@@ -409,7 +416,7 @@ public final class ConnectionProfilesDialog extends DialogWrapper {
             statusArea.setText(problem);
             return;
         }
-        String password = passwordField.getText();
+        String password = new String(passwordField.getPassword());
         statusArea.setText("Connecting to " + candidate.describeTarget() + " \u2026");
 
         new Task.Backgroundable(project, "Testing connection", false) {

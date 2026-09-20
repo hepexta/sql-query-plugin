@@ -40,7 +40,10 @@ import com.intellij.ui.table.JBTable;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.sqlquery.plugin.db.ConnectionProfile;
+import com.sqlquery.plugin.db.DbStructureReader;
+import com.sqlquery.plugin.db.PostgresSession;
 import com.sqlquery.plugin.db.SqlSplitter;
+import com.sqlquery.plugin.db.StatementSafety;
 import com.sqlquery.plugin.db.StatementResult;
 import com.sqlquery.plugin.execute.QueryExecutor;
 import com.sqlquery.plugin.settings.SqlQuerySettings;
@@ -62,6 +65,7 @@ import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.sql.SQLException;
 import java.util.List;
 
 /**
@@ -72,6 +76,7 @@ public final class SqlQueryPanel extends SimpleToolWindowPanel implements com.in
 
     private final Project project;
     private final QueryExecutor executor = new QueryExecutor();
+    private final DatabaseStructurePanel structurePanel;
 
     private final JBTabbedPane resultsTabs = new JBTabbedPane();
     private final JBLabel statusLabel = new JBLabel("Not connected");
@@ -95,6 +100,8 @@ public final class SqlQueryPanel extends SimpleToolWindowPanel implements com.in
         // the flag has to be true - passing false is what pushed the bar down the left edge.
         super(true);
         this.project = project;
+        // Double-clicking an object in the browser runs a generated statement.
+        this.structurePanel = new DatabaseStructurePanel(this::runGeneratedSql);
 
         createEditor();
         setToolbar(createConnectionBar());
@@ -117,6 +124,11 @@ public final class SqlQueryPanel extends SimpleToolWindowPanel implements com.in
     }
 
     // ------------------------------------------------------------------ creation
+
+    /** Exposes the structure browser to tests; not part of the plugin's public surface. */
+    public @Nullable DatabaseStructurePanel getStructurePanelForTests() {
+        return structurePanel;
+    }
 
     /** Exposes the editor to tests; not part of the plugin's public surface. */
     public @Nullable Editor getEditorForTests() {
@@ -205,16 +217,34 @@ public final class SqlQueryPanel extends SimpleToolWindowPanel implements com.in
         return bar;
     }
 
+    /**
+     * The tool window body: the structure browser on the left, and the editor over the results
+     * on the right. The outer splitter is user-draggable and the divider position is
+     * remembered per project by the platform.
+     */
     private @NotNull JComponent createContent() {
-        JBSplitter splitter = new OnePixelSplitter(true, 0.42f);
-        splitter.setFirstComponent(createEditorComponent());
-        splitter.setSecondComponent(createResultsComponent());
-        splitter.setHonorComponentsMinimumSize(true);
+        JBSplitter innerSplitter = new OnePixelSplitter(true, 0.42f);
+        innerSplitter.setFirstComponent(createEditorComponent());
+        innerSplitter.setSecondComponent(createResultsComponent());
+        innerSplitter.setHonorComponentsMinimumSize(true);
 
-        JPanel content = new JBPanel<>(new BorderLayout());
-        content.add(splitter, BorderLayout.CENTER);
-        content.add(createStatusBar(), BorderLayout.SOUTH);
-        return content;
+        JPanel right = new JBPanel<>(new BorderLayout());
+        right.add(innerSplitter, BorderLayout.CENTER);
+        right.add(createStatusBar(), BorderLayout.SOUTH);
+        right.setMinimumSize(new Dimension(0, 0));
+
+        OnePixelSplitter outerSplitter = new OnePixelSplitter(false, 0.24f);
+        outerSplitter.setFirstComponent(structurePanel);
+        outerSplitter.setSecondComponent(right);
+        outerSplitter.setHonorComponentsMinimumSize(true);
+        outerSplitter.setDividerWidth(4);
+        structurePanel.setMinimumSize(new Dimension(120, 0));
+        return outerSplitter;
+    }
+
+    /** The structure browser, for embedding in tests and for programmatic refresh. */
+    public @NotNull DatabaseStructurePanel getStructureBrowser() {
+        return structurePanel;
     }
 
     /** The SQL editor with the execution toolbar directly above it. */
@@ -318,6 +348,8 @@ public final class SqlQueryPanel extends SimpleToolWindowPanel implements com.in
     private void toggleConnection() {
         if (executor.isConnected()) {
             executor.disconnect();
+            structurePanel.setProvider(null, null);
+            structurePanel.reload();
             updateConnectionStateUi();
             setStatus("Disconnected");
             return;
@@ -340,7 +372,77 @@ public final class SqlQueryPanel extends SimpleToolWindowPanel implements com.in
             setStatus("Connected to " + profile.describeTarget());
             refreshDatabases(profile);
             updateConnectionStateUi();
+            attachStructureBrowser();
         }, this::showError);
+    }
+
+    /**
+     * Points the structure browser at the live session and loads the schema list.
+     *
+     * <p>The provider methods are called by the browser on a pooled thread; the underlying
+     * JDBC connection is only touched when the session is idle, which is the same contract the
+     * SQL runner relies on.</p>
+     */
+    private void attachStructureBrowser() {
+        PostgresSession session = executor.session();
+        structurePanel.setProvider(new DatabaseStructurePanel.StructureProvider() {
+            @Override
+            public @NotNull List<String> schemaNames() throws SQLException {
+                return session.schemaNames();
+            }
+
+            @Override
+            public @NotNull List<DbStructureReader.Relation> relations(@NotNull String schema) throws SQLException {
+                return session.relationsOf(schema);
+            }
+
+            @Override
+            public @NotNull List<DbStructureReader.Column> columns(@NotNull String schema,
+                                                                  @NotNull String relation) throws SQLException {
+                return session.columnsOf(schema, relation);
+            }
+
+            @Override
+            public @NotNull List<DbStructureReader.Index> indexes(@NotNull String schema,
+                                                                 @NotNull String relation) throws SQLException {
+                return session.indexesOf(schema, relation);
+            }
+
+            @Override
+            public @NotNull List<DbStructureReader.Routine> routines(@NotNull String schema,
+                                                                    boolean procedures) throws SQLException {
+                return session.routinesOf(schema, procedures);
+            }
+
+            @Override
+            public @NotNull List<DbStructureReader.Trigger> triggers(@NotNull String schema) throws SQLException {
+                return session.triggersOf(schema);
+            }
+
+            @Override
+            public @NotNull List<DbStructureReader.Sequence> sequences(@NotNull String schema) throws SQLException {
+                return session.sequencesOf(schema);
+            }
+
+            @Override
+            public @NotNull List<DbStructureReader.TypeInfo> types(@NotNull String schema) throws SQLException {
+                return session.typesOf(schema);
+            }
+
+            @Override
+            public @NotNull List<DbStructureReader.Extension> extensions() throws SQLException {
+                return session.extensions();
+            }
+        }, "public");
+        structurePanel.reload();
+    }
+
+    /**
+     * Runs a statement generated by the structure browser, exactly as if it had been typed and
+     * the Run button pressed.
+     */
+    private void runGeneratedSql(@NotNull String sql) {
+        runScript(sql);
     }
 
     private void refreshDatabases(@NotNull ConnectionProfile profile) {
@@ -454,7 +556,7 @@ public final class SqlQueryPanel extends SimpleToolWindowPanel implements com.in
         }
 
         SqlQuerySettings settings = SqlQuerySettings.getInstance();
-        if (settings.isConfirmDestructiveStatements() && QueryExecutor.isDestructive(trimmed)) {
+        if (settings.isConfirmDestructiveStatements() && StatementSafety.isDestructive(trimmed)) {
             int answer = Messages.showYesNoDialog(project,
                     "This statement looks destructive:\n\n" + preview(trimmed) + "\n\nRun it anyway?",
                     "Confirm Destructive Statement", Messages.getWarningIcon());
@@ -564,7 +666,9 @@ public final class SqlQueryPanel extends SimpleToolWindowPanel implements com.in
     }
 
     void showError(@NotNull String message) {
-        Messages.showErrorDialog(project, message, "Simple SQL Query");
+        // Server diagnostics are text, not markup: escape them so a message that happens to
+        // contain '<' is displayed rather than interpreted (see UiText).
+        Messages.showErrorDialog(project, UiText.asHtml(message), "Simple SQL Query");
     }
 
     private boolean ensureConnected() {

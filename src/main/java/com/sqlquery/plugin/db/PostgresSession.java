@@ -104,6 +104,48 @@ public final class PostgresSession implements AutoCloseable {
         return new ArrayList<>(SqlRunner.listRelations(requireConnection(), schema));
     }
 
+    // ---------------------------------------------------------------- structure
+
+    /** Schemas, tables, views, functions, triggers and the rest, for the schema browser. */
+    public @NotNull List<String> schemaNames() throws SQLException {
+        return DbStructureReader.schemas(requireConnection());
+    }
+
+    public @NotNull List<DbStructureReader.Relation> relationsOf(@NotNull String schema) throws SQLException {
+        return DbStructureReader.relations(requireConnection(), schema);
+    }
+
+    public @NotNull List<DbStructureReader.Column> columnsOf(@NotNull String schema,
+                                                            @NotNull String relation) throws SQLException {
+        return DbStructureReader.columns(requireConnection(), schema, relation);
+    }
+
+    public @NotNull List<DbStructureReader.Index> indexesOf(@NotNull String schema,
+                                                           @NotNull String relation) throws SQLException {
+        return DbStructureReader.indexes(requireConnection(), schema, relation);
+    }
+
+    public @NotNull List<DbStructureReader.Routine> routinesOf(@NotNull String schema,
+                                                              boolean procedures) throws SQLException {
+        return DbStructureReader.routines(requireConnection(), schema, procedures);
+    }
+
+    public @NotNull List<DbStructureReader.Trigger> triggersOf(@NotNull String schema) throws SQLException {
+        return DbStructureReader.triggers(requireConnection(), schema);
+    }
+
+    public @NotNull List<DbStructureReader.Sequence> sequencesOf(@NotNull String schema) throws SQLException {
+        return DbStructureReader.sequences(requireConnection(), schema);
+    }
+
+    public @NotNull List<DbStructureReader.TypeInfo> typesOf(@NotNull String schema) throws SQLException {
+        return DbStructureReader.types(requireConnection(), schema);
+    }
+
+    public @NotNull List<DbStructureReader.Extension> extensions() throws SQLException {
+        return DbStructureReader.extensions(requireConnection());
+    }
+
     public void disconnect() {
         Connection c = connection;
         connection = null;
