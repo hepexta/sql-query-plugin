@@ -1,43 +1,64 @@
 # Simple SQL Query — IntelliJ IDEA plugin
 
-A small, focused SQL console for **PostgreSQL** inside IntelliJ IDEA, built for **IntelliJ IDEA
-Community Edition** (2025.3, build 253). It connects over JDBC, runs the statement under the
-caret or a whole script, and shows results in a sortable grid — without the paid Database Tools
-that Ultimate ships.
+A small, focused SQL console for **PostgreSQL** inside IntelliJ IDEA. It connects over JDBC, runs
+the statement under the caret or a whole script, shows results in a sortable grid, and browses the
+database structure in a tree — without paying for the Database Tools that Ultimate used to gate.
 
 * Plugin id: `com.sqlquery.simple-sql-query`
-* Version: `1.1.0`
-* Since build: `253` (IntelliJ IDEA 2025.3). No `until-build`, so it keeps working after an
-  IDE upgrade.
+* Version: `1.2.0` — see [CHANGELOG.md](CHANGELOG.md)
+* Target IDE: **IntelliJ IDEA 2026.2.3** (build 262)
+* Since build: `262` (2026.2). No `until-build`, so it keeps working after an IDE upgrade.
 * Licence: **MIT** — see [Licence](#licence).
 
 ---
 
 ## 1. Build
 
-Prerequisite: **JDK 21** (the IntelliJ Platform itself requires 21). Gradle comes from the
+Prerequisite: **JDK 25**. IntelliJ IDEA 2026.2 ships JBR 25 and its platform classes are Java 25
+bytecode (class file major version 69), so compiling against it with JDK 21 fails with
+`bad class file: ... class file has wrong version 69.0, should be 65.0`. Gradle comes from the
 wrapper, and the target IDE is downloaded by the build.
 
 ```powershell
-$env:JAVA_HOME = "C:\path\to\jdk-21"
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-25"
 cd C:\Work\Projects\AI\sql-query-plugin
 .\gradlew.bat buildPlugin
 ```
 
-Result: `build\distributions\sql-query-plugin-1.1.0.zip`
+Result: `build\distributions\sql-query-plugin-1.2.0.zip`
 
 | Task                                             | What it does                                   |
 |--------------------------------------------------|------------------------------------------------|
 | `.\gradlew.bat buildPlugin`                      | Builds the installable zip                     |
-| `.\gradlew.bat test`                             | Runs the headless test suite                   |
+| `.\gradlew.bat test`                             | Runs the headless test suite (see the caveat below) |
 | `.\gradlew.bat runIde`                           | Starts a sandbox IDE with the plugin installed |
 | `.\gradlew.bat verifyPluginStructure`            | Validates `plugin.xml` and the archive layout  |
 | `.\gradlew.bat verifyPluginProjectConfiguration` | Validates the Gradle plugin configuration      |
 
+### Test caveat on 2026.2
+
+`gradlew test` runs two suites. `CoreIntegrationTest` (127 checks against a real PostgreSQL
+server) passes. `ToolWindowBootTest` fails on 2026.2 for a reason outside this plugin: the
+unified IntelliJ IDEA distribution registers an Ultimate post-startup activity whose class is
+obfuscated, and instantiating it throws.
+
+```
+PluginException: Cannot create class Z.Z.Z.Z.Z [Plugin: com.intellij.modules.ultimate]
+Caused by: Cannot find suitable constructor for class Z.Z.Z.Z.Z
+```
+
+The JetBrains test framework turns any logged error into a test failure, so that one platform
+defect fails every UI test. It does **not** affect the real IDE — see [Verification](#6-verification).
+To run only the unaffected suite:
+
+```powershell
+.\gradlew.bat test --tests "*CoreIntegrationTest*"
+```
+
 ## 2. Install
 
 1. **Settings → Plugins → ⚙ → Install Plugin from Disk…**
-2. Pick `build\distributions\sql-query-plugin-1.1.0.zip`.
+2. Pick `build\distributions\sql-query-plugin-1.2.0.zip`.
 3. Restart the IDE.
 4. Open **View → Tool Windows → Simple SQL Query**.
 
@@ -196,8 +217,6 @@ resolves with a seeded profile. Note that the headless IDE registers no tool win
 so the suite deliberately asserts on the extension point rather than on
 `ToolWindowManager.getToolWindow(...)`.
 
-Smoke-tested with `.\gradlew.bat runIde`: the sandbox IDE (build IU-253.28294.334) logs
-`Loaded custom plugins: Simple SQL Query (1.1.0)` with no plugin exception.
 
 ## 7. Project layout
 
@@ -290,13 +309,41 @@ is BSD-2-Clause licensed by the PostgreSQL Global Development Group, which is pe
 obligations trivial. If you ever do bundle it, the notice text is reproduced in
 `THIRD-PARTY-NOTICES.md` for you to carry over.
 
-## 9. Notes on the IntelliJ Platform 2025.3
+## 9. Notes on the IntelliJ Platform 2026.2
 
-Three things changed in 2025.3 and are reflected in `build.gradle.kts`:
+Five platform facts shape this build, all of them reflected in `build.gradle.kts` and
+`gradle.properties`:
 
-* IntelliJ IDEA merged its Community and Ultimate artifacts, so `intellijIdeaCommunity(...)` no
-  longer resolves — the unified `intellijIdea("2025.3")` dependency is the correct one for
-  build 253 and later.
-* IntelliJ Platform Gradle Plugin 2.x requires **Gradle 9+** (the wrapper is pinned to 9.4.0).
-* `until-build` is deprecated for build 243+ and actively prevents installation on newer IDEs,
-  so it is intentionally absent.
+* **JDK 25 is required.** IDEA 2026.2 bundles JBR 25 and its platform classes are Java 25
+  bytecode (`major version 69`). Building against 2026.2 with JDK 21 fails with
+  `class file has wrong version 69.0, should be 65.0`. Hence `javaToolchain=25`.
+* **IntelliJ IDEA Community is no longer a target platform.** JetBrains stopped publishing IC
+  as a development target in 2025.3; `intellijIdeaCommunity("2026.2.3")` fails with
+  `Could not find idea:ideaIC:2026.2.3`. The unified `intellijIdea(...)` dependency is the only
+  supported route, and it resolves to the Ultimate distribution. See
+  [the JetBrains deprecation thread](https://platform.jetbrains.com/t/intellij-platform-gradle-plugins-intellijideacommunity-deprecation/2709).
+* **The platform is modular now.** 2026.2 ships `lib/intellij.platform.*.jar` modules plus
+  `platform-loader.jar` and `modules/module-descriptors.dat`; the old monolithic `app.jar` and
+  `platform-api.jar` are gone. That is why a stale Gradle cache can produce confusing
+  "cannot find symbol" errors for classes like `AnAction`.
+* **IntelliJ Platform Gradle Plugin 2.x requires Gradle 9+** (the wrapper is pinned to 9.4.0).
+  2.19.0 is the newest release and is what this project uses.
+* **`until-build` is deprecated for build 243+** and actively prevents installation on newer
+  IDEs, so it is intentionally absent.
+
+### Raising or lowering the target IDE
+
+`platformVersion` and `pluginSinceBuild` in `gradle.properties` control this, and
+`javaToolchain` must be at least the JBR the target IDE ships:
+
+| Target IDE | `platformVersion` | `pluginSinceBuild` | `javaToolchain` |
+| --- | --- | --- | --- |
+| 2026.2 | `2026.2.3` | `262` | `25` |
+| 2026.1 | `2026.1.5` | `261` | `25` |
+| 2025.3 | `2025.3` | `253` | `21` |
+
+Supporting an older branch means building against it (the platform API is not forward
+compatible): set `platformVersion` to that branch, lower `sinceBuild` to match, drop
+`javaToolchain` accordingly, and re-run the tests. This plugin uses no 2026.2-only API, so
+compiling against an older branch should work unchanged.
+
